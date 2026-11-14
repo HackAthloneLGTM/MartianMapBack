@@ -29,6 +29,15 @@ describe.skipIf(!hasData)('API (real data)', () => {
     expect(exposed).toContain('x-raster-height');
   });
 
+  it('serves elevation and slope Leaflet tiles', async () => {
+    for (const mapName of ['elevation', 'slope']) {
+      const res = await app.inject({ method: 'GET', url: `/map_${mapName}/0/0/0/png` });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('image/png');
+      expect(res.rawPayload.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    }
+  });
+
   it('counts straight-line samples above every slope class as blocked', async () => {
     // No null class: A* treats > 20° as impassable, so the straight line must too.
     const slopeClasses = [

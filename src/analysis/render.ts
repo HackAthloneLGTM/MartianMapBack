@@ -48,14 +48,56 @@ function encode(terrain: Terrain, colorAt: (i: number) => RGB): Buffer {
   return PNG.sync.write(png);
 }
 
+function colorFor(terrain: Terrain, kind: 'elevation' | 'slope', index: number, classes: SlopeClass[]): RGB | null {
+  if (!terrain.valid[index]) return null;
+  if (kind === 'elevation') {
+    const span = terrain.elevationStats.max - terrain.elevationStats.min || 1;
+    return ramp((terrain.elevation.data[index] - terrain.elevationStats.min) / span);
+  }
+  return SLOPE_COLORS[Math.min(classIndexFor(terrain.slope.data[index], classes), SLOPE_COLORS.length - 1)];
+}
+
+/**
+ * Renders an XYZ tile where z=0 contains the complete raster and each zoom
+ * level doubles the raster's tile subdivision.
+ */
+export function renderTile(
+  terrain: Terrain,
+  kind: 'elevation' | 'slope',
+  z: number,
+  x: number,
+  y: number,
+  classes: SlopeClass[],
+  tileSize = 256,
+): Buffer {
+  const png = new PNG({ width: tileSize, height: tileSize });
+  const tiles = 2 ** z;
+  const rasterX0 = (x / tiles) * terrain.width;
+  const rasterY0 = (y / tiles) * terrain.height;
+  const rasterScaleX = terrain.width / tiles / tileSize;
+  const rasterScaleY = terrain.height / tiles / tileSize;
+
+  for (let py = 0; py < tileSize; py++) {
+    for (let px = 0; px < tileSize; px++) {
+      const col = Math.floor(rasterX0 + px * rasterScaleX);
+      const row = Math.floor(rasterY0 + py * rasterScaleY);
+      if (!terrain.inBounds(row, col)) continue;
+      const color = colorFor(terrain, kind, row * terrain.width + col, classes);
+      if (!color) continue;
+      const offset = (py * tileSize + px) * 4;
+      png.data[offset] = color[0];
+      png.data[offset + 1] = color[1];
+      png.data[offset + 2] = color[2];
+      png.data[offset + 3] = 255;
+    }
+  }
+  return PNG.sync.write(png);
+}
+
 export function renderElevation(terrain: Terrain): Buffer {
-  const { min, max } = terrain.elevationStats;
-  const span = max - min || 1;
-  const e = terrain.elevation.data;
-  return encode(terrain, (i) => ramp((e[i] - min) / span));
+  return encode(terrain, (i) => colorFor(terrain, 'elevation', i, [])!);
 }
 
 export function renderSlope(terrain: Terrain, classes: SlopeClass[]): Buffer {
-  const s = terrain.slope.data;
-  return encode(terrain, (i) => SLOPE_COLORS[Math.min(classIndexFor(s[i], classes), SLOPE_COLORS.length - 1)]);
+  return encode(terrain, (i) => colorFor(terrain, 'slope', i, classes)!);
 }

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { Meta, RouteRequest } from '../../shared/types.ts';
-import { renderElevation, renderSlope } from '../analysis/render.ts';
+import { renderElevation, renderSlope, renderTile } from '../analysis/render.ts';
 import { DEFAULT_OPTIONS } from '../config.ts';
 import type { Terrain } from '../data/terrain.ts';
 import type { RoutePlanner } from '../routing/planner.ts';
@@ -47,6 +47,7 @@ const optionsSchema = {
 
 export async function registerRoutes(app: FastifyInstance, terrain: Terrain, planner: RoutePlanner) {
   const layerCache = new Map<string, Buffer>();
+  const tileCache = new Map<string, Buffer>();
 
   app.get('/api/health', async () => ({ ok: true }));
 
@@ -102,6 +103,34 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
     }
     return reply.type('image/png').send(png);
   });
+
+  app.get<{ Params: { mapName: string; z: string; x: string; y: string; format: string } }>(
+    '/map_:mapName/:z/:x/:y/:format',
+    async (req, reply) => {
+      const { mapName, z: rawZ, x: rawX, y: rawY, format } = req.params;
+      if (mapName !== 'elevation' && mapName !== 'slope') {
+        return reply.code(404).send({ error: 'Unknown map. Use elevation or slope' });
+      }
+      if (!format || !/^\d+$/.test(rawZ) || !/^-?\d+$/.test(rawX) || !/^-?\d+$/.test(rawY)) {
+        return reply.code(400).send({ error: 'Tile coordinates must be integers' });
+      }
+
+      const z = Number(rawZ);
+      const x = Number(rawX);
+      const y = Number(rawY);
+      if (!Number.isSafeInteger(z) || z > 30 || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
+        return reply.code(400).send({ error: 'Tile coordinates are out of range' });
+      }
+
+      const key = `${mapName}/${z}/${x}/${y}`;
+      let tile = tileCache.get(key);
+      if (!tile) {
+        tile = renderTile(terrain, mapName, z, x, y, DEFAULT_OPTIONS.slopeClasses);
+        tileCache.set(key, tile);
+      }
+      return reply.header('Cache-Control', 'public, max-age=3600').type('image/png').send(tile);
+    },
+  );
 
   app.post<{ Body: RouteRequest }>(
     '/api/route',
