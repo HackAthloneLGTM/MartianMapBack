@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FALLBACK_DOSE_RATE_MSV_PER_DAY,
+  fallbackRadiation,
   QUALITY_FACTOR,
   fetchRadLabDoseRate,
   loadRadiation,
@@ -77,16 +78,41 @@ describe('loadRadiation', () => {
 
   it('uses the cache without touching the network', async () => {
     const cachePath = tmpCache();
+    mkdirSync(path.dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify({ ...fallbackRadiation(), doseRateMSvPerDay: 0.55, source: 'radlab' }));
     const f = vi.fn();
-    await loadRadiation({ cachePath, disabled: false, fetchImpl: async () => okResponse(CSV) }).then((s) => s.refresh());
     const store = await loadRadiation({ cachePath, disabled: false, fetchImpl: f });
     expect(store.current.source).toBe('cache');
+    expect(store.current.doseRateMSvPerDay).toBe(0.55);
     expect(f).not.toHaveBeenCalled();
+  });
+
+  it('runs only one download for concurrent refreshes', async () => {
+    const cachePath = tmpCache();
+    // A cache present means no startup fetch, so only the two refresh() calls can hit the network.
+    mkdirSync(path.dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(fallbackRadiation()));
+    const f = vi.fn(async () => okResponse(CSV));
+    const live = await loadRadiation({ cachePath, disabled: false, fetchImpl: f });
+    const [a, b] = await Promise.all([live.refresh(), live.refresh()]);
+    expect(f).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b);
+    expect(live.current.source).toBe('radlab');
+  });
+
+  it('keeps the RadLab value when the cache cannot be written', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'radlab-'));
+    const blocker = path.join(dir, 'file');
+    writeFileSync(blocker, '');
+    // cache dir would have to be created under a regular file → mkdir fails
+    const store = await loadRadiation({ cachePath: path.join(blocker, 'radlab.json'), disabled: false, fetchImpl: async () => okResponse(CSV) });
+    await vi.waitFor(() => expect(store.current.note).toContain('cache not written'));
+    expect(store.current.source).toBe('radlab');
+    expect(store.current.note).not.toContain('0.67');
   });
 
   it('keeps the fallback when RadLab is unreachable', async () => {
     const cachePath = tmpCache();
-    writeFileSync(path.join(dir, 'unused'), '');
     const store = await loadRadiation({ cachePath, disabled: false, retries: 1, fetchImpl: async () => Promise.reject(new Error('down')) });
     await vi.waitFor(() => expect(store.current.note).toContain('down'));
     expect(store.current.source).toBe('fallback');

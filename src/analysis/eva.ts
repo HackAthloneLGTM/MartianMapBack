@@ -29,9 +29,8 @@ export function evaLimits(
   const oneWayMinutes = walkMinutes / (o.returnTrip ? 2 : 1);
   const maxOneWayDistanceM = (oneWayMinutes / 60) * o.walkingSpeedKmh * 1000;
   let routeFraction: number | null = null;
-  if (routeDistanceM != null) {
-    routeFraction = maxOneWayDistanceM > 0 ? routeDistanceM / maxOneWayDistanceM : routeDistanceM > 0 ? Infinity : 0;
-  }
+  // Null rather than Infinity when the max is 0: JSON would turn Infinity into null anyway.
+  if (routeDistanceM != null && maxOneWayDistanceM > 0) routeFraction = routeDistanceM / maxOneWayDistanceM;
   return { maxOneWayDistanceM, maxTotalMinutes, limitedBy, doseLimitMinutes, routeFraction };
 }
 

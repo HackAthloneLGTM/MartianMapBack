@@ -59,9 +59,9 @@ Every route response includes `eva`:
 - `maxOneWayDistanceM`: the farthest one-way distance where walking + science stop (+ return leg) stays within both `doseLimitMSv` and `maxEvaMinutes`.
 - `limitedBy`: `dose` or `time`, whichever limit is hit first.
 - `doseLimitMinutes`: minutes until the dose budget runs out.
-- `routeFraction`: route distance ÷ max distance.
+- `routeFraction`: route distance ÷ max distance (null when there's no route or the max distance is 0).
 
-Routes longer than the limit get an `EXCEEDS_EVA_LIMIT` warning.
+Routes longer than the max distance get an `EXCEEDS_EVA_LIMIT` warning.
 
 ## Webapp notes
 

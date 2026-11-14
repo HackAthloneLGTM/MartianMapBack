@@ -109,12 +109,12 @@ export class RoutePlanner {
     }
 
     const eva = evaLimits(o, metrics?.distance2d ?? null);
-    if (eva.routeFraction !== null && eva.routeFraction > 1) {
+    if (metrics && metrics.distance2d > eva.maxOneWayDistanceM) {
       warnings.push({
         code: 'EXCEEDS_EVA_LIMIT',
-        message: `Route is ${metrics!.distance2d.toFixed(0)} m one-way but the ${eva.limitedBy === 'dose' ? `${o.doseLimitMSv} mSv dose budget` : `${o.maxEvaMinutes} min EVA cap`} allows at most ${eva.maxOneWayDistanceM.toFixed(0)} m.`,
+        message: `Route is ${metrics.distance2d.toFixed(0)} m one-way but the ${eva.limitedBy === 'dose' ? `${o.doseLimitMSv} mSv dose budget` : `${o.maxEvaMinutes} min EVA cap`} allows at most ${eva.maxOneWayDistanceM.toFixed(0)} m.`,
         fromDistance: eva.maxOneWayDistanceM,
-        toDistance: metrics!.distance2d,
+        toDistance: metrics.distance2d,
       });
     }
 

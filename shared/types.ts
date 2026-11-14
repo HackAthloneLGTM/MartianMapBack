@@ -74,7 +74,7 @@ export interface EvaLimits {
   limitedBy: 'dose' | 'time';
   /** Minutes until doseLimitMSv is reached at the current dose rate (null when the rate is 0). */
   doseLimitMinutes: number | null;
-  /** Route distance ÷ maxOneWayDistanceM; > 1 means the route exceeds the limits. Null without a route. */
+  /** Route distance ÷ maxOneWayDistanceM; > 1 means the route exceeds the limits. Null without a route or when the max distance is 0. */
   routeFraction: number | null;
 }
 

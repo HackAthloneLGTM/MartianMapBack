@@ -139,15 +139,28 @@ export async function loadRadiation(opts: LoadOptions = {}): Promise<RadiationSt
     // no cache or unreadable: keep the fallback
   }
 
-  const store: RadiationStore = {
-    current,
-    async refresh() {
-      if (disabled) return current;
-      const fresh = await fetchRadLabDoseRate(fetchOpts);
-      Object.assign(current, fresh);
+  // One download at a time: concurrent refresh() calls share the in-flight promise.
+  let inFlight: Promise<RadiationSource> | null = null;
+  const doRefresh = async (): Promise<RadiationSource> => {
+    const fresh = await fetchRadLabDoseRate(fetchOpts);
+    Object.assign(current, fresh);
+    try {
       await mkdir(path.dirname(cachePath), { recursive: true });
       await writeFile(cachePath, JSON.stringify(fresh, null, 2));
-      return current;
+    } catch (err) {
+      current.note += ` (cache not written: ${(err as Error).message})`;
+    }
+    return current;
+  };
+
+  const store: RadiationStore = {
+    current,
+    refresh() {
+      if (disabled) return Promise.resolve(current);
+      inFlight ??= doRefresh().finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 

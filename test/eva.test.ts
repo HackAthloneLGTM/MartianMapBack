@@ -35,8 +35,10 @@ describe('evaLimits', () => {
     expect(oneWay.maxOneWayDistanceM).toBeCloseTo(2 * e.maxOneWayDistanceM);
   });
 
-  it('returns 0 m when the science stop uses the whole budget', () => {
-    expect(evaLimits({ ...base, scienceStopMin: 600 }).maxOneWayDistanceM).toBe(0);
+  it('returns 0 m and a null fraction when the science stop uses the whole budget', () => {
+    const e = evaLimits({ ...base, scienceStopMin: 600 }, 500);
+    expect(e.maxOneWayDistanceM).toBe(0);
+    expect(e.routeFraction).toBeNull();
   });
 
   it('reports the route as a fraction of the limit', () => {
