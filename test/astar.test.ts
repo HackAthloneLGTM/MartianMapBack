@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { evaTiming } from '../src/analysis/eva.js';
-import { astar } from '../src/routing/astar.js';
-import { blockingThreshold, multiplierFor, type CostGrid } from '../src/routing/grid.js';
-import { MinHeap } from '../src/routing/heap.js';
-import { DEFAULT_OPTIONS } from '../src/config.js';
+import { evaTiming } from '../src/analysis/eva.ts';
+import { astar } from '../src/routing/astar.ts';
+import { blockingThreshold, multiplierFor, type CostGrid } from '../src/routing/grid.ts';
+import { MinHeap } from '../src/routing/heap.ts';
+import { DEFAULT_OPTIONS } from '../src/config.ts';
 
 /** '.' = cost 1, '~' = cost 3, '#' = blocked. */
 function gridFrom(rows: string[]): CostGrid {

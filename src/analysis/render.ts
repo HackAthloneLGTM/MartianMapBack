@@ -1,7 +1,7 @@
 import { PNG } from 'pngjs';
-import type { SlopeClass } from '../../shared/types.js';
-import type { Terrain } from '../data/terrain.js';
-import { classIndexFor } from '../routing/grid.js';
+import type { SlopeClass } from '../../shared/types.ts';
+import type { Terrain } from '../data/terrain.ts';
+import { classIndexFor } from '../routing/grid.ts';
 
 type RGB = [number, number, number];
 

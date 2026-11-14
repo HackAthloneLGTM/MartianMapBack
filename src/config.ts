@@ -1,8 +1,24 @@
 import path from 'node:path';
-import type { RouteOptions } from '../shared/types.js';
+import type { RouteOptions } from '../shared/types.ts';
+
+// Load .env if present; variables already set in the shell win.
+try {
+  process.loadEnvFile('.env');
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+}
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? 'data');
-export const PORT = Number(process.env.PORT ?? 3001);
+export const PORT = parsePort(process.env.PORT);
+
+function parsePort(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 3001;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    throw new Error(`Invalid PORT "${raw}": must be an integer between 0 and 65535`);
+  }
+  return n;
+}
 export const HOST = process.env.HOST ?? '0.0.0.0';
 
 export const FILES = {

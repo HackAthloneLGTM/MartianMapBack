@@ -1,5 +1,5 @@
-import type { Aggregation, SlopeClass } from '../../shared/types.js';
-import type { Terrain } from '../data/terrain.js';
+import type { Aggregation, SlopeClass } from '../../shared/types.ts';
+import type { Terrain } from '../data/terrain.ts';
 
 /** Terrain resampled to routing cells of `factor`×`factor` native pixels. NaN = NoData. */
 export interface AggregatedGrid {

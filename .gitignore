@@ -1,4 +1,5 @@
 node_modules/
 dist/
 # symlink or folder holding the Jezero rasters / waypoints (not committed: large binaries)
-data
+# Leading slash: only the top-level folder, not src/data/
+/data

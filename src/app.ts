@@ -1,13 +1,14 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
-import { registerRoutes } from './api/routes.js';
-import { DATA_DIR } from './config.js';
-import { Terrain } from './data/terrain.js';
-import { RoutePlanner } from './routing/planner.js';
+import { registerRoutes } from './api/routes.ts';
+import { DATA_DIR } from './config.ts';
+import { Terrain } from './data/terrain.ts';
+import { RoutePlanner } from './routing/planner.ts';
 
 export async function buildServer(dataDir = DATA_DIR) {
   const app = Fastify({ logger: true });
-  await app.register(cors, { origin: true });
+  // Expose the raster-size headers sent with /api/layers/*.bin so browser fetch() can read them.
+  await app.register(cors, { origin: true, exposedHeaders: ['X-Raster-Width', 'X-Raster-Height'] });
 
   const t0 = performance.now();
   const terrain = await Terrain.load(dataDir);

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import type { Meta, RouteRequest } from '../../shared/types.js';
-import { renderElevation, renderSlope } from '../analysis/render.js';
-import { DEFAULT_OPTIONS } from '../config.js';
-import type { Terrain } from '../data/terrain.js';
-import type { RoutePlanner } from '../routing/planner.js';
+import type { Meta, RouteRequest } from '../../shared/types.ts';
+import { renderElevation, renderSlope } from '../analysis/render.ts';
+import { DEFAULT_OPTIONS } from '../config.ts';
+import type { Terrain } from '../data/terrain.ts';
+import type { RoutePlanner } from '../routing/planner.ts';
 
 const pointSchema = {
   type: 'object',
@@ -16,8 +16,10 @@ const pointSchema = {
   oneOf: [{ required: ['x', 'y'] }, { required: ['row', 'col'] }],
 } as const;
 
+// additionalProperties: false — Fastify strips unknown keys so they are not echoed back in `options`.
 const optionsSchema = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     cellSize: { type: 'number' },
     aggregation: { type: 'string', enum: ['max', 'p90'] },
@@ -26,9 +28,10 @@ const optionsSchema = {
       minItems: 1,
       items: {
         type: 'object',
+        additionalProperties: false,
         required: ['maxDeg', 'multiplier'],
         properties: {
-          maxDeg: { type: 'number' },
+          maxDeg: { type: 'number', minimum: 0, maximum: 90 },
           multiplier: { type: ['number', 'null'] },
           label: { type: 'string' },
         },

@@ -1,4 +1,4 @@
-import type { RouteMetrics, RouteOptions, RoutePoint } from '../../shared/types.js';
+import type { RouteMetrics, RouteOptions, RoutePoint } from '../../shared/types.ts';
 
 export interface EvaTiming {
   oneWayMinutes: number;
