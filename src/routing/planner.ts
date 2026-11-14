@@ -11,7 +11,7 @@ import { CELL_SIZE_LIMITS, DEFAULT_OPTIONS } from '../config.ts';
 import { BadRequestError, type ResolvedPoint, type Terrain } from '../data/terrain.ts';
 import { pixelToWorld } from '../data/transform.ts';
 import { astar } from './astar.ts';
-import { blockingThreshold, buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.ts';
+import { buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.ts';
 
 export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOptions {
   const o: RouteOptions = { ...DEFAULT_OPTIONS, ...partial };
@@ -19,6 +19,7 @@ export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOption
   if (o.slopeClasses.length === 0) throw new BadRequestError('slopeClasses must not be empty');
   for (const c of o.slopeClasses) {
     if (c.multiplier !== null && !(c.multiplier > 0)) throw new BadRequestError('slope multipliers must be > 0 or null');
+    if (!(c.maxDeg >= 0 && c.maxDeg <= 90)) throw new BadRequestError('slope class maxDeg must be between 0 and 90');
   }
   if (!(o.cellSize >= CELL_SIZE_LIMITS.min && o.cellSize <= CELL_SIZE_LIMITS.max)) {
     throw new BadRequestError(`cellSize must be between ${CELL_SIZE_LIMITS.min} and ${CELL_SIZE_LIMITS.max} m`);
@@ -78,7 +79,7 @@ export class RoutePlanner {
       const inner = result.path.slice(1, -1).map((idx) => this.cellCenter(agg, idx));
       path = [start, ...inner, end].map((p) => this.toRoutePoint(p));
       metrics = pathMetrics(path, o);
-      warnings.push(...this.slopeWarnings(path, o));
+      warnings.push(...this.slopeWarnings(path, agg, o));
     } else {
       warnings.push({
         code: 'NO_ROUTE',
@@ -131,25 +132,33 @@ export class RoutePlanner {
     const T = this.terrain;
     const len = Math.hypot(b.x - a.x, b.y - a.y);
     const steps = Math.max(1, Math.ceil(len / T.pixelSize));
-    const threshold = blockingThreshold(o.slopeClasses);
     const path: RoutePoint[] = [];
     let blocked = 0;
     for (let i = 0; i <= steps; i++) {
       const f = i / steps;
       const s = T.sampleWorld(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
-      if (!s.valid || (s.slope !== null && s.slope > threshold)) blocked++;
+      // Same rule A* uses: impassable when no class gives a multiplier (incl. slopes above every class).
+      if (!s.valid || s.slope === null || multiplierFor(s.slope, o.slopeClasses) === null) blocked++;
       path.push({ x: s.x, y: s.y, row: s.row, col: s.col, elevation: s.elevation, slope: s.slope, distance: 0 });
     }
     const m = pathMetrics(path, o);
     return { path, metrics: { ...m, blockedSamples: blocked, totalSamples: path.length } };
   }
 
-  /** Groups consecutive route points on steep (multiplier ≥ 2) or impassable terrain into warnings. */
-  private slopeWarnings(path: RoutePoint[], o: RouteOptions): RouteWarning[] {
+  /**
+   * Groups consecutive route points on steep (multiplier ≥ 2) or impassable terrain into warnings.
+   * Uses the aggregated cell slope (what A* actually costed), not the single native pixel at the point,
+   * so a steep patch inside a cell is reported even when the cell's centre pixel is flat.
+   */
+  private slopeWarnings(path: RoutePoint[], agg: AggregatedGrid, o: RouteOptions): RouteWarning[] {
     const out: RouteWarning[] = [];
-    const kindOf = (p: RoutePoint): 'STEEP_SECTION' | 'IMPASSABLE_SECTION' | null => {
-      if (p.slope === null) return null;
-      const m = multiplierFor(p.slope, o.slopeClasses);
+    const cellSlope = (p: RoutePoint): number | null => {
+      const s = agg.slope[Math.floor(p.row / agg.factor) * agg.width + Math.floor(p.col / agg.factor)];
+      return Number.isNaN(s) ? null : s;
+    };
+    const kindOf = (slope: number | null): 'STEEP_SECTION' | 'IMPASSABLE_SECTION' | null => {
+      if (slope === null) return null;
+      const m = multiplierFor(slope, o.slopeClasses);
       if (m === null) return 'IMPASSABLE_SECTION';
       return m >= 2 ? 'STEEP_SECTION' : null;
     };
@@ -165,13 +174,14 @@ export class RoutePlanner {
       run = null;
     };
     for (const p of path) {
-      const k = kindOf(p);
+      const slope = cellSlope(p);
+      const k = kindOf(slope);
       if (k && run && run.kind === k) {
         run.to = p.distance;
-        run.max = Math.max(run.max, p.slope!);
+        run.max = Math.max(run.max, slope!);
       } else {
         flush();
-        if (k) run = { kind: k, from: p.distance, to: p.distance, max: p.slope! };
+        if (k) run = { kind: k, from: p.distance, to: p.distance, max: slope! };
       }
     }
     flush();

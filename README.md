@@ -15,7 +15,7 @@ npm test
 
 The data folder must contain `jezero_elevation_crop.tif`, `jezero_slope_crop.tif` and `waypoints.gpkg`.
 
-Environment variables: `DATA_DIR` (default `./data`), `PORT` (3001), `HOST` (0.0.0.0).
+Environment variables: `DATA_DIR` (default `./data`), `PORT` (3001), `HOST` (0.0.0.0). They are set in `.env`; variables already set in your shell take precedence.
 
 ## API
 

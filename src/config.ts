@@ -1,8 +1,25 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RouteOptions } from '../shared/types.ts';
 
+// Load .env if present; variables already set in the shell win.
+try {
+  process.loadEnvFile('.env');
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+}
+
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? 'data');
-export const PORT = Number(process.env.PORT ?? 3001);
+export const PORT = parsePort(process.env.PORT);
+
+export function parsePort(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return 3001;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    throw new Error(`Invalid PORT "${raw}": must be an integer between 0 and 65535`);
+  }
+  return n;
+}
 export const HOST = process.env.HOST ?? '0.0.0.0';
 
 export const FILES = {
@@ -10,6 +27,11 @@ export const FILES = {
   slope: 'jezero_slope_crop.tif',
   waypoints: 'waypoints.gpkg',
 } as const;
+
+/** True when `dir` contains every file in FILES (elevation, slope and waypoints). */
+export function hasDataFiles(dir: string): boolean {
+  return Object.values(FILES).every((f) => existsSync(path.join(dir, f)));
+}
 
 /** Project assumptions for demonstration — not official NASA safety limits. */
 export const DEFAULT_OPTIONS: RouteOptions = {
