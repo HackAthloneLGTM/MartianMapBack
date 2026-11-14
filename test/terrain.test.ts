@@ -1,11 +1,9 @@
-import { existsSync } from 'node:fs';
-import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { DATA_DIR, FILES } from '../src/config.ts';
+import { DATA_DIR, hasDataFiles } from '../src/config.ts';
 import { Terrain } from '../src/data/terrain.ts';
 import { RoutePlanner } from '../src/routing/planner.ts';
 
-const hasData = Object.values(FILES).every((f) => existsSync(path.join(DATA_DIR, f)));
+const hasData = hasDataFiles(DATA_DIR);
 
 describe.skipIf(!hasData)('Jezero terrain (real data)', () => {
   let terrain: Terrain;

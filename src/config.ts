@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import type { RouteOptions } from '../shared/types.ts';
 
@@ -11,7 +12,7 @@ try {
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? 'data');
 export const PORT = parsePort(process.env.PORT);
 
-function parsePort(raw: string | undefined): number {
+export function parsePort(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === '') return 3001;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 0 || n > 65535) {
@@ -26,6 +27,11 @@ export const FILES = {
   slope: 'jezero_slope_crop.tif',
   waypoints: 'waypoints.gpkg',
 } as const;
+
+/** True when `dir` contains every file in FILES (elevation, slope and waypoints). */
+export function hasDataFiles(dir: string): boolean {
+  return Object.values(FILES).every((f) => existsSync(path.join(dir, f)));
+}
 
 /** Project assumptions for demonstration — not official NASA safety limits. */
 export const DEFAULT_OPTIONS: RouteOptions = {
