@@ -5,13 +5,13 @@ import type {
   RouteResponse,
   RouteWarning,
   StraightLineMetrics,
-} from '../../shared/types.js';
-import { pathMetrics } from '../analysis/eva.js';
-import { CELL_SIZE_LIMITS, DEFAULT_OPTIONS } from '../config.js';
-import { BadRequestError, type ResolvedPoint, type Terrain } from '../data/terrain.js';
-import { pixelToWorld } from '../data/transform.js';
-import { astar } from './astar.js';
-import { blockingThreshold, buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.js';
+} from '../../shared/types.ts';
+import { pathMetrics } from '../analysis/eva.ts';
+import { CELL_SIZE_LIMITS, DEFAULT_OPTIONS } from '../config.ts';
+import { BadRequestError, type ResolvedPoint, type Terrain } from '../data/terrain.ts';
+import { pixelToWorld } from '../data/transform.ts';
+import { astar } from './astar.ts';
+import { blockingThreshold, buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.ts';
 
 export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOptions {
   const o: RouteOptions = { ...DEFAULT_OPTIONS, ...partial };
@@ -32,8 +32,10 @@ export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOption
 
 export class RoutePlanner {
   private grids: GridCache;
+  private readonly terrain: Terrain;
 
-  constructor(private terrain: Terrain) {
+  constructor(terrain: Terrain) {
+    this.terrain = terrain;
     this.grids = new GridCache(terrain);
   }
 

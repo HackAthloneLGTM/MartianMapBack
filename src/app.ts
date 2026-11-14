@@ -1,9 +1,9 @@
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
-import { registerRoutes } from './api/routes.js';
-import { DATA_DIR } from './config.js';
-import { Terrain } from './data/terrain.js';
-import { RoutePlanner } from './routing/planner.js';
+import { registerRoutes } from './api/routes.ts';
+import { DATA_DIR } from './config.ts';
+import { Terrain } from './data/terrain.ts';
+import { RoutePlanner } from './routing/planner.ts';
 
 export async function buildServer(dataDir = DATA_DIR) {
   const app = Fastify({ logger: true });

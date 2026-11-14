@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import type { Meta, RouteRequest } from '../../shared/types.js';
-import { renderElevation, renderSlope } from '../analysis/render.js';
-import { DEFAULT_OPTIONS } from '../config.js';
-import type { Terrain } from '../data/terrain.js';
-import type { RoutePlanner } from '../routing/planner.js';
+import type { Meta, RouteRequest } from '../../shared/types.ts';
+import { renderElevation, renderSlope } from '../analysis/render.ts';
+import { DEFAULT_OPTIONS } from '../config.ts';
+import type { Terrain } from '../data/terrain.ts';
+import type { RoutePlanner } from '../routing/planner.ts';
 
 const pointSchema = {
   type: 'object',

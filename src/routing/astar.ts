@@ -1,5 +1,5 @@
-import type { CostGrid } from './grid.js';
-import { MinHeap } from './heap.js';
+import type { CostGrid } from './grid.ts';
+import { MinHeap } from './heap.ts';
 
 export interface AStarOptions {
   /** Extra cost per metre climbed (requires grid.elevation). */

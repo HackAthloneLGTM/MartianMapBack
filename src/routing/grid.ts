@@ -1,5 +1,5 @@
-import type { Aggregation, SlopeClass } from '../../shared/types.js';
-import type { Terrain } from '../data/terrain.js';
+import type { Aggregation, SlopeClass } from '../../shared/types.ts';
+import type { Terrain } from '../data/terrain.ts';
 
 /** Terrain resampled to routing cells of `factor`×`factor` native pixels. NaN = NoData. */
 export interface AggregatedGrid {
@@ -117,7 +117,11 @@ export function buildCostGrid(agg: AggregatedGrid, classes: SlopeClass[]): CostG
 /** Caches aggregated grids per (factor, aggregation) — building one touches every native pixel. */
 export class GridCache {
   private cache = new Map<string, AggregatedGrid>();
-  constructor(private terrain: Terrain) {}
+  private readonly terrain: Terrain;
+
+  constructor(terrain: Terrain) {
+    this.terrain = terrain;
+  }
 
   get(factor: number, aggregation: Aggregation): AggregatedGrid {
     const key = `${factor}|${aggregation}`;
