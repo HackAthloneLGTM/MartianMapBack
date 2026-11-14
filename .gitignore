@@ -3,3 +3,5 @@ dist/
 # symlink or folder holding the Jezero rasters / waypoints (not committed: large binaries)
 # Leading slash: only the top-level folder, not src/data/
 /data
+# RadLab dose-rate cache
+/.cache

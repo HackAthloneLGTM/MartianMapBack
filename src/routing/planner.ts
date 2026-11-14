@@ -1,21 +1,23 @@
 import type {
   PointInput,
+  RadiationSource,
   RouteOptions,
   RoutePoint,
   RouteResponse,
   RouteWarning,
   StraightLineMetrics,
 } from '../../shared/types.ts';
-import { pathMetrics } from '../analysis/eva.ts';
+import { evaLimits, pathMetrics } from '../analysis/eva.ts';
 import { CELL_SIZE_LIMITS, DEFAULT_OPTIONS } from '../config.ts';
+import { fallbackRadiation } from '../data/radlab.ts';
 import { BadRequestError, type ResolvedPoint, type Terrain } from '../data/terrain.ts';
 import { pixelToWorld } from '../data/transform.ts';
 import { astar } from './astar.ts';
 import { buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.ts';
 
-export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOptions {
-  const o: RouteOptions = { ...DEFAULT_OPTIONS, ...partial };
-  o.slopeClasses = [...(partial.slopeClasses ?? DEFAULT_OPTIONS.slopeClasses)].sort((a, b) => a.maxDeg - b.maxDeg);
+export function resolveOptions(partial: Partial<RouteOptions> = {}, defaults: RouteOptions = DEFAULT_OPTIONS): RouteOptions {
+  const o: RouteOptions = { ...defaults, ...partial };
+  o.slopeClasses = [...(partial.slopeClasses ?? defaults.slopeClasses)].sort((a, b) => a.maxDeg - b.maxDeg);
   if (o.slopeClasses.length === 0) throw new BadRequestError('slopeClasses must not be empty');
   for (const c of o.slopeClasses) {
     if (c.multiplier !== null && !(c.multiplier > 0)) throw new BadRequestError('slope multipliers must be > 0 or null');
@@ -28,21 +30,32 @@ export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOption
   if (o.scienceStopMin < 0 || o.doseRateMSvPerDay < 0 || o.uphillPenalty < 0) {
     throw new BadRequestError('scienceStopMin, doseRateMSvPerDay and uphillPenalty must be >= 0');
   }
+  if (!(o.doseLimitMSv > 0) || !(o.maxEvaMinutes > 0)) {
+    throw new BadRequestError('doseLimitMSv and maxEvaMinutes must be > 0');
+  }
   return o;
 }
 
 export class RoutePlanner {
   private grids: GridCache;
   private readonly terrain: Terrain;
+  /** Live object; a background RadLab refresh updates it in place. */
+  readonly radiation: RadiationSource;
 
-  constructor(terrain: Terrain) {
+  constructor(terrain: Terrain, radiation: RadiationSource = fallbackRadiation()) {
     this.terrain = terrain;
+    this.radiation = radiation;
     this.grids = new GridCache(terrain);
+  }
+
+  /** DEFAULT_OPTIONS with the current RadLab dose rate. */
+  defaults(): RouteOptions {
+    return { ...DEFAULT_OPTIONS, doseRateMSvPerDay: this.radiation.doseRateMSvPerDay };
   }
 
   plan(startIn: PointInput, endIn: PointInput, partial?: Partial<RouteOptions>): RouteResponse {
     const t0 = performance.now();
-    const o = resolveOptions(partial);
+    const o = resolveOptions(partial, this.defaults());
     const T = this.terrain;
     const start = T.resolvePoint(startIn, 'start');
     const end = T.resolvePoint(endIn, 'end');
@@ -95,6 +108,16 @@ export class RoutePlanner {
       });
     }
 
+    const eva = evaLimits(o, metrics?.distance2d ?? null);
+    if (eva.routeFraction !== null && eva.routeFraction > 1) {
+      warnings.push({
+        code: 'EXCEEDS_EVA_LIMIT',
+        message: `Route is ${metrics!.distance2d.toFixed(0)} m one-way but the ${eva.limitedBy === 'dose' ? `${o.doseLimitMSv} mSv dose budget` : `${o.maxEvaMinutes} min EVA cap`} allows at most ${eva.maxOneWayDistanceM.toFixed(0)} m.`,
+        fromDistance: eva.maxOneWayDistanceM,
+        toDistance: metrics!.distance2d,
+      });
+    }
+
     return {
       found: result.path !== null,
       path,
@@ -102,6 +125,8 @@ export class RoutePlanner {
       straightLine,
       warnings,
       options: o,
+      eva,
+      radiation: { ...this.radiation },
       stats: {
         computeMs: performance.now() - t0,
         gridWidth: agg.width,

@@ -15,7 +15,7 @@ npm test
 
 The data folder must contain `jezero_elevation_crop.tif`, `jezero_slope_crop.tif` and `waypoints.gpkg`.
 
-Environment variables: `DATA_DIR` (default `./data`), `PORT` (3001), `HOST` (0.0.0.0). They are set in `.env`; variables already set in your shell take precedence.
+Environment variables: `DATA_DIR` (default `./data`), `PORT` (3001), `HOST` (0.0.0.0), `RADLAB` (`off` disables the RadLab download). They are set in `.env`; variables already set in your shell take precedence.
 
 ## API
 
@@ -30,6 +30,8 @@ All coordinates are **EQUIRECTANGULAR MARS metres**, not lat/lon. Endpoints acce
 | GET | `/api/layers/elevation.bin`, `/api/layers/slope.bin` | Raw Float32 little-endian, row-major |
 | POST | `/api/route` | `{ start, end, options? }` → `RouteResponse` |
 | GET | `/api/route/default` | Route between the GeoPackage START and END |
+| GET | `/api/radiation` | Dose rate in use + max EVA reach. Optional query overrides: `doseLimitMSv`, `maxEvaMinutes`, `walkingSpeedKmh`, `scienceStopMin`, `returnTrip`, `doseRateMSvPerDay` |
+| POST | `/api/radiation/refresh` | Re-download the RadLab record (slow, ~275k rows) |
 
 ### Route options (all optional)
 
@@ -42,7 +44,24 @@ All coordinates are **EQUIRECTANGULAR MARS metres**, not lat/lon. Endpoints acce
 | `walkingSpeedKmh` | 1 | |
 | `scienceStopMin` | 30 | |
 | `returnTrip` | true | The return leg reuses the outbound path |
-| `doseRateMSvPerDay` | 0.67 | Curiosity RAD historical average, not a live Jezero measurement |
+| `doseRateMSvPerDay` | RadLab (≈0.57), else 0.67 | See *Radiation* below |
+| `doseLimitMSv` | 0.25 | Per-EVA dose budget for the max-distance limit (demo assumption, not a NASA limit) |
+| `maxEvaMinutes` | 480 | Hard cap on total EVA time, science stop included |
+
+### Radiation and max EVA distance
+
+On startup the server takes the default dose rate from [NASA RadLab](https://visualization.osdr.nasa.gov/radlab/gui/data-api): the mean of every Curiosity RAD surface `absorbed_dose_rate` reading (2015-01 to 2024-06, about 0.188 mGy/day). That mean is multiplied by a quality factor of 3.05 (Hassler et al. 2014) to get about 0.57 mSv/day. The result is cached in `.cache/radlab.json`, and later starts read the cache instead of the network. Until the first download finishes, or if RadLab is unreachable (it often resets connections), the server uses 0.67 mSv/day from the project guide. Set `RADLAB=off` to skip the network. `radiation.source` in responses tells you which value is in use (`radlab` / `cache` / `fallback`).
+
+This is still a Gale Crater historical average. It is not a live Jezero reading, and it ignores suit shielding and solar particle events.
+
+Every route response includes `eva`:
+
+- `maxOneWayDistanceM`: the farthest one-way distance where walking + science stop (+ return leg) stays within both `doseLimitMSv` and `maxEvaMinutes`.
+- `limitedBy`: `dose` or `time`, whichever limit is hit first.
+- `doseLimitMinutes`: minutes until the dose budget runs out.
+- `routeFraction`: route distance ÷ max distance.
+
+Routes longer than the limit get an `EXCEEDS_EVA_LIMIT` warning.
 
 ## Webapp notes
 
@@ -52,7 +71,7 @@ Use Leaflet with `L.CRS.Simple` (or OpenLayers with a custom projection). Place 
 
 ```
 shared/types.ts      API types shared with the webapp
-src/data/            GeoTIFF + GeoPackage readers, pixel/world transform, Terrain
+src/data/            GeoTIFF + GeoPackage readers, pixel/world transform, Terrain, RadLab client
 src/routing/         grid aggregation, cost grid, A*, RoutePlanner
 src/analysis/        EVA time/dose metrics, PNG rendering
 src/api/routes.ts    Fastify endpoints

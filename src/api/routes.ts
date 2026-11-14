@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import type { Meta, RouteRequest } from '../../shared/types.ts';
+import type { Meta, RouteOptions, RouteRequest } from '../../shared/types.ts';
+import { evaLimits } from '../analysis/eva.ts';
 import { renderElevation, renderSlope } from '../analysis/render.ts';
+import type { RadiationStore } from '../data/radlab.ts';
 import { DEFAULT_OPTIONS } from '../config.ts';
 import type { Terrain } from '../data/terrain.ts';
-import type { RoutePlanner } from '../routing/planner.ts';
+import { resolveOptions, type RoutePlanner } from '../routing/planner.ts';
 
 const pointSchema = {
   type: 'object',
@@ -42,10 +44,26 @@ const optionsSchema = {
     scienceStopMin: { type: 'number' },
     returnTrip: { type: 'boolean' },
     doseRateMSvPerDay: { type: 'number' },
+    doseLimitMSv: { type: 'number' },
+    maxEvaMinutes: { type: 'number' },
   },
 } as const;
 
-export async function registerRoutes(app: FastifyInstance, terrain: Terrain, planner: RoutePlanner) {
+/** Options that affect the EVA reach limit, accepted as query parameters on /api/radiation. */
+const evaQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    walkingSpeedKmh: { type: 'number' },
+    scienceStopMin: { type: 'number' },
+    returnTrip: { type: 'boolean' },
+    doseRateMSvPerDay: { type: 'number' },
+    doseLimitMSv: { type: 'number' },
+    maxEvaMinutes: { type: 'number' },
+  },
+} as const;
+
+export async function registerRoutes(app: FastifyInstance, terrain: Terrain, planner: RoutePlanner, radiation?: RadiationStore) {
   const layerCache = new Map<string, Buffer>();
 
   app.get('/api/health', async () => ({ ok: true }));
@@ -66,8 +84,28 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
       validFraction: terrain.validCount / (t.width * t.height),
       elevation: terrain.elevationStats,
       slope: terrain.slopeStats,
-      defaults: DEFAULT_OPTIONS,
+      defaults: planner.defaults(),
     };
+  });
+
+  /** Dose rate in use (RadLab Curiosity average or fallback) and the max EVA reach for the given options. */
+  app.get<{ Querystring: Partial<RouteOptions> }>(
+    '/api/radiation',
+    { schema: { querystring: evaQuerySchema } },
+    async (req) => {
+      const o = resolveOptions(req.query, planner.defaults());
+      return { radiation: { ...planner.radiation }, eva: evaLimits(o), options: o };
+    },
+  );
+
+  /** Re-download the RadLab record (slow: ~275k rows). */
+  app.post('/api/radiation/refresh', async (_req, reply) => {
+    if (!radiation) return reply.code(501).send({ error: 'Radiation store not configured' });
+    try {
+      return { radiation: { ...(await radiation.refresh()) } };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message, radiation: { ...planner.radiation } });
+    }
   });
 
   app.get('/api/waypoints', async () => terrain.waypoints);
