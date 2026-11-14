@@ -28,6 +28,7 @@ All coordinates are **EQUIRECTANGULAR MARS metres**, not lat/lon. Endpoints acce
 | GET | `/api/sample?x=&y=` or `?row=&col=` | Elevation/slope at a point |
 | GET | `/api/layers/elevation.png`, `/api/layers/slope.png` | Coloured overlays (NoData is transparent) |
 | GET | `/api/layers/elevation.bin`, `/api/layers/slope.bin` | Raw Float32 little-endian, row-major |
+| GET | `/map_{map_name}/{z}/{x}/{y}/{s}` | 256×256 PNG XYZ tile for `elevation` or `slope`; `z=0` is the complete raster |
 | POST | `/api/route` | `{ start, end, options? }` → `RouteResponse` |
 | GET | `/api/route/default` | Route between the GeoPackage START and END |
 | GET | `/api/radiation` | Dose rate in use + max EVA reach. Optional query overrides: `doseLimitMSv`, `maxEvaMinutes`, `walkingSpeedKmh`, `scienceStopMin`, `returnTrip`, `doseRateMSvPerDay` |
@@ -65,7 +66,7 @@ Routes longer than the max distance get an `EXCEEDS_EVA_LIMIT` warning.
 
 ## Webapp notes
 
-Use Leaflet with `L.CRS.Simple` (or OpenLayers with a custom projection). Place `slope.png` over `meta.bounds`, then draw `route.path` and `route.straightLine.path` as polylines.
+Use Leaflet with `L.CRS.Simple` (or OpenLayers with a custom projection). Tile URLs are `/map_elevation/{z}/{x}/{y}/png` and `/map_slope/{z}/{x}/{y}/png`; at zoom 0 the tile represents the complete raster. Draw routes after scaling their raster pixel coordinates into the 256×256 map bounds.
 
 ## Layout
 
