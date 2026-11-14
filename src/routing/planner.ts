@@ -1,0 +1,178 @@
+import type {
+  PointInput,
+  RouteOptions,
+  RoutePoint,
+  RouteResponse,
+  RouteWarning,
+  StraightLineMetrics,
+} from '../../shared/types.js';
+import { pathMetrics } from '../analysis/eva.js';
+import { CELL_SIZE_LIMITS, DEFAULT_OPTIONS } from '../config.js';
+import { BadRequestError, type ResolvedPoint, type Terrain } from '../data/terrain.js';
+import { pixelToWorld } from '../data/transform.js';
+import { astar } from './astar.js';
+import { blockingThreshold, buildCostGrid, GridCache, multiplierFor, type AggregatedGrid } from './grid.js';
+
+export function resolveOptions(partial: Partial<RouteOptions> = {}): RouteOptions {
+  const o: RouteOptions = { ...DEFAULT_OPTIONS, ...partial };
+  o.slopeClasses = [...(partial.slopeClasses ?? DEFAULT_OPTIONS.slopeClasses)].sort((a, b) => a.maxDeg - b.maxDeg);
+  if (o.slopeClasses.length === 0) throw new BadRequestError('slopeClasses must not be empty');
+  for (const c of o.slopeClasses) {
+    if (c.multiplier !== null && !(c.multiplier > 0)) throw new BadRequestError('slope multipliers must be > 0 or null');
+  }
+  if (!(o.cellSize >= CELL_SIZE_LIMITS.min && o.cellSize <= CELL_SIZE_LIMITS.max)) {
+    throw new BadRequestError(`cellSize must be between ${CELL_SIZE_LIMITS.min} and ${CELL_SIZE_LIMITS.max} m`);
+  }
+  if (!(o.walkingSpeedKmh > 0)) throw new BadRequestError('walkingSpeedKmh must be > 0');
+  if (o.scienceStopMin < 0 || o.doseRateMSvPerDay < 0 || o.uphillPenalty < 0) {
+    throw new BadRequestError('scienceStopMin, doseRateMSvPerDay and uphillPenalty must be >= 0');
+  }
+  return o;
+}
+
+export class RoutePlanner {
+  private grids: GridCache;
+
+  constructor(private terrain: Terrain) {
+    this.grids = new GridCache(terrain);
+  }
+
+  plan(startIn: PointInput, endIn: PointInput, partial?: Partial<RouteOptions>): RouteResponse {
+    const t0 = performance.now();
+    const o = resolveOptions(partial);
+    const T = this.terrain;
+    const start = T.resolvePoint(startIn, 'start');
+    const end = T.resolvePoint(endIn, 'end');
+    const warnings: RouteWarning[] = [];
+
+    const factor = Math.max(1, Math.round(o.cellSize / T.pixelSize));
+    const agg = this.grids.get(factor, o.aggregation);
+    const grid = buildCostGrid(agg, o.slopeClasses);
+    const finite = o.slopeClasses.map((c) => c.multiplier).filter((m): m is number => m !== null);
+    const minMult = finite.length ? Math.min(...finite) : 1;
+    const maxMult = finite.length ? Math.max(...finite) : 1;
+
+    const sIdx = Math.floor(start.row / factor) * agg.width + Math.floor(start.col / factor);
+    const eIdx = Math.floor(end.row / factor) * agg.width + Math.floor(end.col / factor);
+
+    // Let the astronaut leave/arrive even if the endpoint cell itself is rated impassable.
+    if (grid.cost[sIdx] === Infinity) {
+      grid.cost[sIdx] = maxMult;
+      warnings.push({ code: 'START_BLOCKED', message: 'Start lies on very steep terrain or NoData; route begins there anyway.' });
+    }
+    if (grid.cost[eIdx] === Infinity) {
+      grid.cost[eIdx] = maxMult;
+      warnings.push({ code: 'END_BLOCKED', message: 'End lies on very steep terrain or NoData; route ends there anyway.' });
+    }
+
+    const result = astar(grid, sIdx, eIdx, { uphillPenalty: o.uphillPenalty, minMultiplier: minMult });
+
+    let path: RoutePoint[] = [];
+    let metrics = null;
+    if (result.path) {
+      if (result.path.length === 1) {
+        warnings.push({ code: 'SAME_CELL', message: 'Start and end fall in the same routing cell.' });
+      }
+      const inner = result.path.slice(1, -1).map((idx) => this.cellCenter(agg, idx));
+      path = [start, ...inner, end].map((p) => this.toRoutePoint(p));
+      metrics = pathMetrics(path, o);
+      warnings.push(...this.slopeWarnings(path, o));
+    } else {
+      warnings.push({
+        code: 'NO_ROUTE',
+        message: 'No route found that avoids impassable slopes and NoData. Try relaxing slope classes or a smaller cellSize.',
+      });
+    }
+
+    const straightLine = this.straightLine(start, end, o);
+    if (straightLine.metrics.blockedSamples > 0) {
+      warnings.push({
+        code: 'STRAIGHT_LINE_BLOCKED',
+        message: `The straight line crosses impassable terrain at ${straightLine.metrics.blockedSamples} of ${straightLine.metrics.totalSamples} samples.`,
+      });
+    }
+
+    return {
+      found: result.path !== null,
+      path,
+      metrics,
+      straightLine,
+      warnings,
+      options: o,
+      stats: {
+        computeMs: performance.now() - t0,
+        gridWidth: agg.width,
+        gridHeight: agg.height,
+        cellsExpanded: result.expanded,
+      },
+    };
+  }
+
+  /** World position of a routing cell's centre, clamped to the raster for partial edge cells. */
+  private cellCenter(agg: AggregatedGrid, idx: number): ResolvedPoint {
+    const gr = Math.floor(idx / agg.width);
+    const gc = idx - gr * agg.width;
+    const T = this.terrain;
+    const rowF = Math.min(gr * agg.factor + agg.factor / 2, T.height - 0.5);
+    const colF = Math.min(gc * agg.factor + agg.factor / 2, T.width - 0.5);
+    const { x, y } = pixelToWorld(T.transform, rowF, colF);
+    return { x, y, row: Math.floor(rowF), col: Math.floor(colF) };
+  }
+
+  private toRoutePoint(p: ResolvedPoint): RoutePoint {
+    const s = this.terrain.sampleAt(p.row, p.col);
+    return { x: p.x, y: p.y, row: p.row, col: p.col, elevation: s.elevation, slope: s.slope, distance: 0 };
+  }
+
+  /** Samples the direct line at native resolution for the "as the crow flies" comparison. */
+  private straightLine(a: ResolvedPoint, b: ResolvedPoint, o: RouteOptions): { path: RoutePoint[]; metrics: StraightLineMetrics } {
+    const T = this.terrain;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    const steps = Math.max(1, Math.ceil(len / T.pixelSize));
+    const threshold = blockingThreshold(o.slopeClasses);
+    const path: RoutePoint[] = [];
+    let blocked = 0;
+    for (let i = 0; i <= steps; i++) {
+      const f = i / steps;
+      const s = T.sampleWorld(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+      if (!s.valid || (s.slope !== null && s.slope > threshold)) blocked++;
+      path.push({ x: s.x, y: s.y, row: s.row, col: s.col, elevation: s.elevation, slope: s.slope, distance: 0 });
+    }
+    const m = pathMetrics(path, o);
+    return { path, metrics: { ...m, blockedSamples: blocked, totalSamples: path.length } };
+  }
+
+  /** Groups consecutive route points on steep (multiplier ≥ 2) or impassable terrain into warnings. */
+  private slopeWarnings(path: RoutePoint[], o: RouteOptions): RouteWarning[] {
+    const out: RouteWarning[] = [];
+    const kindOf = (p: RoutePoint): 'STEEP_SECTION' | 'IMPASSABLE_SECTION' | null => {
+      if (p.slope === null) return null;
+      const m = multiplierFor(p.slope, o.slopeClasses);
+      if (m === null) return 'IMPASSABLE_SECTION';
+      return m >= 2 ? 'STEEP_SECTION' : null;
+    };
+    let run: { kind: 'STEEP_SECTION' | 'IMPASSABLE_SECTION'; from: number; to: number; max: number } | null = null;
+    const flush = () => {
+      if (!run) return;
+      out.push({
+        code: run.kind,
+        message: `${run.kind === 'STEEP_SECTION' ? 'Steep' : 'Impassable-rated'} terrain (up to ${run.max.toFixed(1)}°) from ${run.from.toFixed(0)} m to ${run.to.toFixed(0)} m.`,
+        fromDistance: run.from,
+        toDistance: run.to,
+      });
+      run = null;
+    };
+    for (const p of path) {
+      const k = kindOf(p);
+      if (k && run && run.kind === k) {
+        run.to = p.distance;
+        run.max = Math.max(run.max, p.slope!);
+      } else {
+        flush();
+        if (k) run = { kind: k, from: p.distance, to: p.distance, max: p.slope! };
+      }
+    }
+    flush();
+    return out;
+  }
+}
