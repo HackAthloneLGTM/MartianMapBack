@@ -49,6 +49,11 @@ const optionsSchema = {
   },
 } as const;
 
+/** Native raster is ~1135 px, so z≈3 is 1:1; deeper zooms just upsample (Leaflet asks for up to z18 by default). */
+const MAX_TILE_ZOOM = 30;
+/** Most-recently-used tiles kept in memory (each ≤ ~100 KB). */
+const TILE_CACHE_MAX = 2000;
+
 /** Options that affect the EVA reach limit, accepted as query parameters on /api/radiation. */
 const evaQuerySchema = {
   type: 'object',
@@ -149,23 +154,35 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
       if (mapName !== 'elevation' && mapName !== 'slope') {
         return reply.code(404).send({ error: 'Unknown map. Use elevation or slope' });
       }
-      if (!format || !/^\d+$/.test(rawZ) || !/^-?\d+$/.test(rawX) || !/^-?\d+$/.test(rawY)) {
+      if (format !== 'png') {
+        return reply.code(404).send({ error: 'Only png tiles are available' });
+      }
+      if (!/^\d+$/.test(rawZ) || !/^-?\d+$/.test(rawX) || !/^-?\d+$/.test(rawY)) {
         return reply.code(400).send({ error: 'Tile coordinates must be integers' });
       }
 
       const z = Number(rawZ);
       const x = Number(rawX);
       const y = Number(rawY);
-      if (!Number.isSafeInteger(z) || z > 30 || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
-        return reply.code(400).send({ error: 'Tile coordinates are out of range' });
+      if (!Number.isSafeInteger(z) || z > MAX_TILE_ZOOM || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
+        return reply.code(400).send({ error: `Tile coordinates are out of range (z ≤ ${MAX_TILE_ZOOM})` });
+      }
+      // Tiles outside the raster's 2^z × 2^z grid are empty: don't render or cache them.
+      const tiles = 2 ** z;
+      if (x < 0 || y < 0 || x >= tiles || y >= tiles) {
+        return reply.code(404).send({ error: 'Tile is outside the map' });
       }
 
       const key = `${mapName}/${z}/${x}/${y}`;
       let tile = tileCache.get(key);
-      if (!tile) {
+      if (tile) {
+        // Re-insert so Map order tracks recency (LRU).
+        tileCache.delete(key);
+      } else {
         tile = renderTile(terrain, mapName, z, x, y, DEFAULT_OPTIONS.slopeClasses);
-        tileCache.set(key, tile);
+        if (tileCache.size >= TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value!);
       }
+      tileCache.set(key, tile);
       return reply.header('Cache-Control', 'public, max-age=3600').type('image/png').send(tile);
     },
   );

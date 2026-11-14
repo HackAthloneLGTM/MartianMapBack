@@ -41,6 +41,14 @@ describe.skipIf(!hasData)('API (real data)', () => {
     expect(exposed).toContain('x-raster-height');
   });
 
+  it('rejects tiles outside the grid, too deep, or not png', async () => {
+    for (const url of ['/map_slope/1/2/0/png', '/map_slope/0/-1/0/png', '/map_slope/0/0/0/jpg', '/map_slope/1/0/0/png/x']) {
+      expect((await app.inject({ method: 'GET', url })).statusCode, url).toBe(404);
+    }
+    expect((await app.inject({ method: 'GET', url: '/map_slope/31/0/0/png' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/map_slope/1/1/1/png' })).statusCode).toBe(200);
+  });
+
   it('serves elevation and slope Leaflet tiles', async () => {
     for (const mapName of ['elevation', 'slope']) {
       const res = await app.inject({ method: 'GET', url: `/map_${mapName}/0/0/0/png` });
