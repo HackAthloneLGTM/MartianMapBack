@@ -77,3 +77,13 @@ src/routing/         grid aggregation, cost grid, A*, RoutePlanner
 src/analysis/        EVA time/dose metrics, PNG rendering
 src/api/routes.ts    Fastify endpoints
 ```
+
+## Credits
+
+Terrain data: HiRISE digital terrain model DTEEC_023524_1985_023379_1985_U01 of Jezero Crater, courtesy of NASA/JPL/University of Arizona.
+
+Radiation data: Curiosity Radiation Assessment Detector (RAD) dose rates, courtesy of NASA/JPL-Caltech/SwRI.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
