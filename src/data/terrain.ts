@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { PointInput, RasterStats, Sample, Waypoint } from '../../shared/types.ts';
 import { FILES } from '../config.ts';
-import { loadRaster, type Raster } from './geotiff.ts';
+import { loadOpticalRaster, loadRaster, type OpticalRaster, type Raster } from './geotiff.ts';
 import { loadWaypoints } from './gpkg.ts';
 import { gridBounds, inBounds, pixelCenter, sameGrid, worldToPixel, type GridTransform } from './transform.ts';
 
@@ -55,9 +55,13 @@ export class Terrain {
     rawWaypoints: { name: string; x: number; y: number }[],
     readonly crsName: string | null = null,
     readonly crsWkt: string | null = null,
+    readonly optical: OpticalRaster | null = null,
   ) {
     if (!sameGrid(elevation, slope)) {
       throw new Error('Elevation and slope rasters do not share the same pixel grid');
+    }
+    if (optical && !sameGrid(elevation, optical)) {
+      throw new Error('Optical raster does not share the same pixel grid as the terrain rasters');
     }
     this.transform = {
       width: elevation.width,
@@ -89,12 +93,13 @@ export class Terrain {
   }
 
   static async load(dataDir: string): Promise<Terrain> {
-    const [elevation, slope] = await Promise.all([
+    const [elevation, slope, optical] = await Promise.all([
       loadRaster(path.join(dataDir, FILES.elevation)),
       loadRaster(path.join(dataDir, FILES.slope)),
+      loadOpticalRaster(path.join(dataDir, FILES.optical)),
     ]);
     const wp = loadWaypoints(path.join(dataDir, FILES.waypoints));
-    return new Terrain(elevation, slope, wp.points, wp.crsName, wp.crsWkt);
+    return new Terrain(elevation, slope, wp.points, wp.crsName, wp.crsWkt, optical);
   }
 
   get width() {

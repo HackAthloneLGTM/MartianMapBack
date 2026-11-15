@@ -49,8 +49,8 @@ describe.skipIf(!hasData)('API (real data)', () => {
     expect((await app.inject({ method: 'GET', url: '/map_slope/1/1/1/png' })).statusCode).toBe(200);
   });
 
-  it('serves elevation and slope Leaflet tiles', async () => {
-    for (const mapName of ['elevation', 'slope']) {
+  it('serves elevation, slope and optical Leaflet tiles', async () => {
+    for (const mapName of ['elevation', 'slope', 'optical']) {
       const res = await app.inject({ method: 'GET', url: `/map_${mapName}/0/0/0/png` });
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toContain('image/png');

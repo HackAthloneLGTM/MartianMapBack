@@ -25,10 +25,11 @@ export const HOST = process.env.HOST ?? '0.0.0.0';
 export const FILES = {
   elevation: 'jezero_elevation_crop.tif',
   slope: 'jezero_slope_crop.tif',
+  optical: 'marspure.tif',
   waypoints: 'waypoints.gpkg',
 } as const;
 
-/** True when `dir` contains every file in FILES (elevation, slope and waypoints). */
+/** True when `dir` contains every configured data file. */
 export function hasDataFiles(dir: string): boolean {
   return Object.values(FILES).every((f) => existsSync(path.join(dir, f)));
 }

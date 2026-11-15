@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Meta, RouteOptions, RouteRequest } from '../../shared/types.ts';
 import { evaLimits } from '../analysis/eva.ts';
-import { renderElevation, renderSlope, renderTile } from '../analysis/render.ts';
+import { renderElevation, renderOptical, renderSlope, renderTile } from '../analysis/render.ts';
 import type { RadiationStore } from '../data/radlab.ts';
 import { DEFAULT_OPTIONS } from '../config.ts';
 import type { Terrain } from '../data/terrain.ts';
@@ -128,12 +128,13 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
 
   app.get<{ Params: { layer: string } }>('/api/layers/:layer', async (req, reply) => {
     const { layer } = req.params;
-    const m = /^(elevation|slope)\.(png|bin)$/.exec(layer);
-    if (!m) return reply.code(404).send({ error: 'Unknown layer. Use elevation|slope with .png or .bin' });
+    const m = /^(elevation|slope|optical)\.(png|bin)$/.exec(layer);
+    if (!m) return reply.code(404).send({ error: 'Unknown layer. Use elevation|slope|optical with .png or .bin' });
     const [, kind, ext] = m;
 
     reply.header('Cache-Control', 'public, max-age=3600');
     if (ext === 'bin') {
+      if (kind === 'optical') return reply.code(404).send({ error: 'The optical layer is only available as PNG' });
       // Raw little-endian Float32, row-major, width × height from /api/meta. NoData kept as-is.
       const data = kind === 'elevation' ? terrain.elevation.data : terrain.slope.data;
       reply.header('X-Raster-Width', terrain.width).header('X-Raster-Height', terrain.height);
@@ -141,7 +142,12 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
     }
     let png = layerCache.get(kind);
     if (!png) {
-      png = kind === 'elevation' ? renderElevation(terrain) : renderSlope(terrain, DEFAULT_OPTIONS.slopeClasses);
+      png =
+        kind === 'elevation'
+          ? renderElevation(terrain)
+          : kind === 'slope'
+            ? renderSlope(terrain, DEFAULT_OPTIONS.slopeClasses)
+            : renderOptical(terrain);
       layerCache.set(kind, png);
     }
     return reply.type('image/png').send(png);
@@ -151,8 +157,8 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
     '/map_:mapName/:z/:x/:y/:format',
     async (req, reply) => {
       const { mapName, z: rawZ, x: rawX, y: rawY, format } = req.params;
-      if (mapName !== 'elevation' && mapName !== 'slope') {
-        return reply.code(404).send({ error: 'Unknown map. Use elevation or slope' });
+      if (mapName !== 'elevation' && mapName !== 'slope' && mapName !== 'optical') {
+        return reply.code(404).send({ error: 'Unknown map. Use elevation, slope or optical' });
       }
       if (format !== 'png') {
         return reply.code(404).send({ error: 'Only png tiles are available' });

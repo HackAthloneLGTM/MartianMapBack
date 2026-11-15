@@ -48,8 +48,13 @@ function encode(terrain: Terrain, colorAt: (i: number) => RGB): Buffer {
   return PNG.sync.write(png);
 }
 
-function colorFor(terrain: Terrain, kind: 'elevation' | 'slope', index: number, classes: SlopeClass[]): RGB | null {
+function colorFor(terrain: Terrain, kind: 'elevation' | 'slope' | 'optical', index: number, classes: SlopeClass[]): RGB | null {
   if (!terrain.valid[index]) return null;
+  if (kind === 'optical') {
+    if (!terrain.optical) throw new Error('Optical raster is not loaded');
+    const o = index * 3;
+    return [terrain.optical.data[o], terrain.optical.data[o + 1], terrain.optical.data[o + 2]];
+  }
   if (kind === 'elevation') {
     const span = terrain.elevationStats.max - terrain.elevationStats.min || 1;
     return ramp((terrain.elevation.data[index] - terrain.elevationStats.min) / span);
@@ -63,7 +68,7 @@ function colorFor(terrain: Terrain, kind: 'elevation' | 'slope', index: number, 
  */
 export function renderTile(
   terrain: Terrain,
-  kind: 'elevation' | 'slope',
+  kind: 'elevation' | 'slope' | 'optical',
   z: number,
   x: number,
   y: number,
@@ -100,4 +105,9 @@ export function renderElevation(terrain: Terrain): Buffer {
 
 export function renderSlope(terrain: Terrain, classes: SlopeClass[]): Buffer {
   return encode(terrain, (i) => colorFor(terrain, 'slope', i, classes)!);
+}
+
+export function renderOptical(terrain: Terrain): Buffer {
+  if (!terrain.optical) throw new Error('Optical raster is not loaded');
+  return encode(terrain, (i) => colorFor(terrain, 'optical', i, [])!);
 }
