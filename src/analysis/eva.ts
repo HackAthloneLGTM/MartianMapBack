@@ -1,4 +1,4 @@
-import type { RouteMetrics, RouteOptions, RoutePoint } from '../../shared/types.ts';
+import type { EvaLimits, RouteMetrics, RouteOptions, RoutePoint } from '../../shared/types.ts';
 
 export interface EvaTiming {
   oneWayMinutes: number;
@@ -12,6 +12,26 @@ export function evaTiming(distanceM: number, o: Pick<RouteOptions, 'walkingSpeed
   const totalEvaMinutes = oneWayMinutes * (o.returnTrip ? 2 : 1) + o.scienceStopMin;
   const doseMSv = (totalEvaMinutes / 60) * (o.doseRateMSvPerDay / 24);
   return { oneWayMinutes, totalEvaMinutes, doseMSv };
+}
+
+/**
+ * Inverse of evaTiming: the farthest one-way distance whose EVA stays under both the dose budget
+ * (doseLimitMSv at doseRateMSvPerDay) and the time cap (maxEvaMinutes), science stop included.
+ */
+export function evaLimits(
+  o: Pick<RouteOptions, 'walkingSpeedKmh' | 'scienceStopMin' | 'returnTrip' | 'doseRateMSvPerDay' | 'doseLimitMSv' | 'maxEvaMinutes'>,
+  routeDistanceM?: number | null,
+): EvaLimits {
+  const doseLimitMinutes = o.doseRateMSvPerDay > 0 ? (o.doseLimitMSv / (o.doseRateMSvPerDay / 24)) * 60 : null;
+  const limitedBy = doseLimitMinutes !== null && doseLimitMinutes < o.maxEvaMinutes ? 'dose' : 'time';
+  const maxTotalMinutes = limitedBy === 'dose' ? doseLimitMinutes! : o.maxEvaMinutes;
+  const walkMinutes = Math.max(0, maxTotalMinutes - o.scienceStopMin);
+  const oneWayMinutes = walkMinutes / (o.returnTrip ? 2 : 1);
+  const maxOneWayDistanceM = (oneWayMinutes / 60) * o.walkingSpeedKmh * 1000;
+  let routeFraction: number | null = null;
+  // Null rather than Infinity when the max is 0: JSON would turn Infinity into null anyway.
+  if (routeDistanceM != null && maxOneWayDistanceM > 0) routeFraction = routeDistanceM / maxOneWayDistanceM;
+  return { maxOneWayDistanceM, maxTotalMinutes, limitedBy, doseLimitMinutes, routeFraction };
 }
 
 /** Fills in `distance` on each point (mutates) and returns path metrics. */

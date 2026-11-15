@@ -1,9 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import type { Meta, RouteRequest } from '../../shared/types.ts';
+import type { Meta, RouteOptions, RouteRequest } from '../../shared/types.ts';
+import { evaLimits } from '../analysis/eva.ts';
 import { renderElevation, renderSlope, renderTile } from '../analysis/render.ts';
+import type { RadiationStore } from '../data/radlab.ts';
 import { DEFAULT_OPTIONS } from '../config.ts';
 import type { Terrain } from '../data/terrain.ts';
-import type { RoutePlanner } from '../routing/planner.ts';
+import { resolveOptions, type RoutePlanner } from '../routing/planner.ts';
 
 const pointSchema = {
   type: 'object',
@@ -42,10 +44,31 @@ const optionsSchema = {
     scienceStopMin: { type: 'number' },
     returnTrip: { type: 'boolean' },
     doseRateMSvPerDay: { type: 'number' },
+    doseLimitMSv: { type: 'number' },
+    maxEvaMinutes: { type: 'number' },
   },
 } as const;
 
-export async function registerRoutes(app: FastifyInstance, terrain: Terrain, planner: RoutePlanner) {
+/** Native raster is ~1135 px, so z≈3 is 1:1; deeper zooms just upsample (Leaflet asks for up to z18 by default). */
+const MAX_TILE_ZOOM = 30;
+/** Most-recently-used tiles kept in memory (each ≤ ~100 KB). */
+const TILE_CACHE_MAX = 2000;
+
+/** Options that affect the EVA reach limit, accepted as query parameters on /api/radiation. */
+const evaQuerySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    walkingSpeedKmh: { type: 'number' },
+    scienceStopMin: { type: 'number' },
+    returnTrip: { type: 'boolean' },
+    doseRateMSvPerDay: { type: 'number' },
+    doseLimitMSv: { type: 'number' },
+    maxEvaMinutes: { type: 'number' },
+  },
+} as const;
+
+export async function registerRoutes(app: FastifyInstance, terrain: Terrain, planner: RoutePlanner, radiation?: RadiationStore) {
   const layerCache = new Map<string, Buffer>();
   const tileCache = new Map<string, Buffer>();
 
@@ -67,8 +90,28 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
       validFraction: terrain.validCount / (t.width * t.height),
       elevation: terrain.elevationStats,
       slope: terrain.slopeStats,
-      defaults: DEFAULT_OPTIONS,
+      defaults: planner.defaults(),
     };
+  });
+
+  /** Dose rate in use (RadLab Curiosity average or fallback) and the max EVA reach for the given options. */
+  app.get<{ Querystring: Partial<RouteOptions> }>(
+    '/api/radiation',
+    { schema: { querystring: evaQuerySchema } },
+    async (req) => {
+      const o = resolveOptions(req.query, planner.defaults());
+      return { radiation: { ...planner.radiation }, eva: evaLimits(o), options: o };
+    },
+  );
+
+  /** Re-download the RadLab record (slow: ~275k rows). */
+  app.post('/api/radiation/refresh', async (_req, reply) => {
+    if (!radiation) return reply.code(501).send({ error: 'Radiation store not configured' });
+    try {
+      return { radiation: { ...(await radiation.refresh()) } };
+    } catch (err) {
+      return reply.code(502).send({ error: (err as Error).message, radiation: { ...planner.radiation } });
+    }
   });
 
   app.get('/api/waypoints', async () => terrain.waypoints);
@@ -111,23 +154,35 @@ export async function registerRoutes(app: FastifyInstance, terrain: Terrain, pla
       if (mapName !== 'elevation' && mapName !== 'slope') {
         return reply.code(404).send({ error: 'Unknown map. Use elevation or slope' });
       }
-      if (!format || !/^\d+$/.test(rawZ) || !/^-?\d+$/.test(rawX) || !/^-?\d+$/.test(rawY)) {
+      if (format !== 'png') {
+        return reply.code(404).send({ error: 'Only png tiles are available' });
+      }
+      if (!/^\d+$/.test(rawZ) || !/^-?\d+$/.test(rawX) || !/^-?\d+$/.test(rawY)) {
         return reply.code(400).send({ error: 'Tile coordinates must be integers' });
       }
 
       const z = Number(rawZ);
       const x = Number(rawX);
       const y = Number(rawY);
-      if (!Number.isSafeInteger(z) || z > 30 || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
-        return reply.code(400).send({ error: 'Tile coordinates are out of range' });
+      if (!Number.isSafeInteger(z) || z > MAX_TILE_ZOOM || !Number.isSafeInteger(x) || !Number.isSafeInteger(y)) {
+        return reply.code(400).send({ error: `Tile coordinates are out of range (z ≤ ${MAX_TILE_ZOOM})` });
+      }
+      // Tiles outside the raster's 2^z × 2^z grid are empty: don't render or cache them.
+      const tiles = 2 ** z;
+      if (x < 0 || y < 0 || x >= tiles || y >= tiles) {
+        return reply.code(404).send({ error: 'Tile is outside the map' });
       }
 
       const key = `${mapName}/${z}/${x}/${y}`;
       let tile = tileCache.get(key);
-      if (!tile) {
+      if (tile) {
+        // Re-insert so Map order tracks recency (LRU).
+        tileCache.delete(key);
+      } else {
         tile = renderTile(terrain, mapName, z, x, y, DEFAULT_OPTIONS.slopeClasses);
-        tileCache.set(key, tile);
+        if (tileCache.size >= TILE_CACHE_MAX) tileCache.delete(tileCache.keys().next().value!);
       }
+      tileCache.set(key, tile);
       return reply.header('Cache-Control', 'public, max-age=3600').type('image/png').send(tile);
     },
   );

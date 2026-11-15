@@ -48,7 +48,10 @@ export const DEFAULT_OPTIONS: RouteOptions = {
   scienceStopMin: 30,
   returnTrip: true,
   // Curiosity RAD, Gale Crater — historical average, not a live Jezero measurement.
+  // Replaced at runtime by the NASA RadLab Curiosity RAD average when available (see src/data/radlab.ts).
   doseRateMSvPerDay: 0.67,
+  doseLimitMSv: 0.25,
+  maxEvaMinutes: 480,
 };
 
 export const CELL_SIZE_LIMITS = { min: 1, max: 50 } as const;

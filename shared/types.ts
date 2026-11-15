@@ -45,6 +45,37 @@ export interface RouteOptions {
   scienceStopMin: number;
   returnTrip: boolean;
   doseRateMSvPerDay: number;
+  /** Per-EVA radiation budget used for the max-distance limit (demo assumption, not a NASA limit). */
+  doseLimitMSv: number;
+  /** Hard cap on total EVA duration, including the science stop. */
+  maxEvaMinutes: number;
+}
+
+/** Where the dose rate came from. `radlab` = fresh NASA RadLab download, `cache` = earlier download. */
+export interface RadiationSource {
+  doseRateMSvPerDay: number;
+  /** Mean absorbed dose from RAD, before the quality factor. */
+  absorbedMGyPerDay: number | null;
+  qualityFactor: number | null;
+  samples: number;
+  /** Time span of the averaged RAD readings (ISO timestamps). */
+  from: string | null;
+  to: string | null;
+  source: 'radlab' | 'cache' | 'fallback';
+  fetchedAt: string | null;
+  note: string;
+}
+
+export interface EvaLimits {
+  /** Farthest one-way walking distance (metres) that keeps the EVA within both limits. */
+  maxOneWayDistanceM: number;
+  /** Total EVA minutes allowed (the lower of the dose and time limits). */
+  maxTotalMinutes: number;
+  limitedBy: 'dose' | 'time';
+  /** Minutes until doseLimitMSv is reached at the current dose rate (null when the rate is 0). */
+  doseLimitMinutes: number | null;
+  /** Route distance ÷ maxOneWayDistanceM; > 1 means the route exceeds the limits. Null without a route or when the max distance is 0. */
+  routeFraction: number | null;
 }
 
 export interface RasterStats {
@@ -115,7 +146,8 @@ export type WarningCode =
   | 'STEEP_SECTION'
   | 'IMPASSABLE_SECTION'
   | 'STRAIGHT_LINE_BLOCKED'
-  | 'SAME_CELL';
+  | 'SAME_CELL'
+  | 'EXCEEDS_EVA_LIMIT';
 
 export interface RouteWarning {
   code: WarningCode;
@@ -141,6 +173,8 @@ export interface RouteResponse {
   };
   warnings: RouteWarning[];
   options: RouteOptions;
+  eva: EvaLimits;
+  radiation: RadiationSource;
   stats: {
     computeMs: number;
     gridWidth: number;
